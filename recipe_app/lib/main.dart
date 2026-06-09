@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:receive_sharing_intent/receive_sharing_intent.dart';
+import 'package:flutter_sharing_intent/flutter_sharing_intent.dart';
+import 'package:flutter_sharing_intent/model/sharing_file.dart';
 import 'screens/home_screen.dart';
 import 'screens/import_screen.dart';
 import 'theme/app_theme.dart';
@@ -27,25 +28,25 @@ class _RecipeAppState extends State<RecipeApp> {
 
   void _initShareHandling() {
     // Handle share when app is already open
-    ReceiveSharingIntent.instance.getMediaStream().listen(
-      (List<SharedMediaFile> files) {
+    FlutterSharingIntent.instance.getMediaStream().listen(
+      (List<SharedFile> files) {
         _handleSharedContent(files);
       },
       onError: (err) => debugPrint('Share stream error: $err'),
     );
 
     // Handle share that launched the app
-    ReceiveSharingIntent.instance.getInitialMedia().then(
-      (List<SharedMediaFile> files) {
+    FlutterSharingIntent.instance.getInitialSharing().then(
+      (List<SharedFile> files) {
         if (files.isNotEmpty) {
           _handleSharedContent(files);
-          ReceiveSharingIntent.instance.reset();
+          FlutterSharingIntent.instance.reset();
         }
       },
     );
   }
 
-  void _handleSharedContent(List<SharedMediaFile> files) {
+  void _handleSharedContent(List<SharedFile> files) {
     if (files.isEmpty) return;
 
     // Collect text/URLs from the shared content
@@ -53,37 +54,37 @@ class _RecipeAppState extends State<RecipeApp> {
     String? sharedUrl;
 
     for (final file in files) {
-      if (file.type == SharedMediaType.url) {
-        sharedUrl = file.path;
-      } else if (file.type == SharedMediaType.text) {
-        final text = file.path;
-        // Check if it looks like a URL
-        if (text.startsWith('http://') || text.startsWith('https://')) {
-          sharedUrl ??= text;
-        } else {
-          sharedText = (sharedText ?? '') + text;
+      final val = file.value ?? '';
+      if (file.type == SharedMediaType.URL) {
+        sharedUrl ??= val.isNotEmpty ? val : null;
+      } else if (file.type == SharedMediaType.TEXT) {
+        if (val.startsWith('http://') || val.startsWith('https://')) {
+          sharedUrl ??= val;
+        } else if (val.isNotEmpty) {
+          sharedText = (sharedText ?? '') + val;
         }
       }
-    }
-
-    // Also check the message field which often contains captions
-    if (sharedText == null) {
-      for (final file in files) {
-        if (file.message != null && file.message!.isNotEmpty) {
-          sharedText = file.message;
-          break;
+      // For video/image shares, the caption/URL is in the message field
+      // and the value is a local file path — ignore the file path itself
+      if (file.message != null && file.message!.isNotEmpty) {
+        final msg = file.message!;
+        // Extract URL from message if present
+        final urlMatch = RegExp(r'https?://\S+').firstMatch(msg);
+        if (urlMatch != null) {
+          sharedUrl ??= urlMatch.group(0);
         }
+        // Keep the full message as caption text for Claude
+        sharedText ??= msg;
       }
     }
 
     if (sharedUrl == null && sharedText == null) return;
 
     String? platform;
-    if (sharedUrl != null) {
-      if (sharedUrl.contains('instagram.com')) platform = 'instagram';
-      else if (sharedUrl.contains('tiktok.com')) platform = 'tiktok';
-      else platform = 'web';
-    }
+    final urlForPlatform = sharedUrl ?? sharedText ?? '';
+    if (urlForPlatform.contains('instagram.com')) platform = 'instagram';
+    else if (urlForPlatform.contains('tiktok.com')) platform = 'tiktok';
+    else if (sharedUrl != null) platform = 'web';
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _navigatorKey.currentState?.push(

@@ -12,7 +12,7 @@ dependencies:
   # HTTP client
   http: ^1.2.1
   # Share intent on Android
-  receive_sharing_intent: ^1.8.0
+  flutter_sharing_intent: ^2.0.4
   # Local config storage
   shared_preferences: ^2.3.2
   # URL launcher for opening source links

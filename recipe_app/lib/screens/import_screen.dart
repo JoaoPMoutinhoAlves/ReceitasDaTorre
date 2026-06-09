@@ -47,8 +47,10 @@ class _ImportScreenState extends State<ImportScreen> {
   @override
   void initState() {
     super.initState();
-    if (widget.sharedUrl != null || widget.sharedText != null) {
-      // Auto-trigger parsing
+    // Auto-trigger only when we have actual text content (not just a social URL)
+    final hasCaptionText = widget.sharedText != null && widget.sharedText!.isNotEmpty;
+    final isSocialUrl = widget.platform == 'instagram' || widget.platform == 'tiktok';
+    if (hasCaptionText || (widget.sharedUrl != null && !isSocialUrl)) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _triggerParse());
     }
   }
@@ -66,7 +68,10 @@ class _ImportScreenState extends State<ImportScreen> {
 
   Future<void> _triggerParse() async {
     final url = widget.sharedUrl ?? _urlCtrl.text.trim();
-    final text = widget.sharedText ?? _textCtrl.text.trim();
+    // Prefer manually typed caption over auto-detected text (user can correct it)
+    final text = _textCtrl.text.trim().isNotEmpty
+        ? _textCtrl.text.trim()
+        : (widget.sharedText ?? '');
     final platform = widget.platform ?? _manualPlatform;
 
     if (url.isEmpty && text.isEmpty) {
@@ -131,7 +136,7 @@ class _ImportScreenState extends State<ImportScreen> {
       cookTimeMinutes: int.tryParse(_cookCtrl.text.trim()),
       ingredients: ingredients,
       steps: steps,
-      sourceUrl: _parsed?.sourceUrl ?? (widget.sharedUrl ?? _urlCtrl.text.trim().isNotEmpty ? (widget.sharedUrl ?? _urlCtrl.text.trim()) : null),
+      sourceUrl: _parsed?.sourceUrl ?? widget.sharedUrl ?? (_urlCtrl.text.trim().isNotEmpty ? _urlCtrl.text.trim() : null),
       sourcePlatform: _parsed?.sourcePlatform ?? widget.platform ?? _manualPlatform,
       tags: _parsed?.tags ?? [],
       imageUrl: _parsed?.imageUrl,
@@ -141,8 +146,13 @@ class _ImportScreenState extends State<ImportScreen> {
   Future<void> _save() async {
     final input = _buildFromForm();
     if (input.name.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a recipe name')),
+      await showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Missing name'),
+          content: const Text('Please enter a recipe name before saving.'),
+          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
+        ),
       );
       return;
     }
@@ -152,10 +162,16 @@ class _ImportScreenState extends State<ImportScreen> {
       await ApiService.createRecipe(input);
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
-      setState(() {
-        _error = e.toString();
-        _step = _ImportStep.review;
-      });
+      if (!mounted) return;
+      setState(() => _step = _ImportStep.review);
+      await showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Save failed'),
+          content: Text(e.toString()),
+          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
+        ),
+      );
     }
   }
 
@@ -217,7 +233,7 @@ class _ImportScreenState extends State<ImportScreen> {
               maxLines: 5,
             ),
           ] else ...[
-            // Auto-share: show what was shared
+            // Auto-share: show what was captured
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
@@ -227,16 +243,30 @@ class _ImportScreenState extends State<ImportScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (widget.sharedUrl != null) ...[
+                  if (widget.sharedUrl != null)
                     Text('URL: ${widget.sharedUrl}',
                         style: const TextStyle(fontSize: 12), maxLines: 2, overflow: TextOverflow.ellipsis),
-                  ],
                   if (widget.sharedText != null) ...[
-                    const SizedBox(height: 4),
+                    if (widget.sharedUrl != null) const SizedBox(height: 4),
                     Text(widget.sharedText!, style: const TextStyle(fontSize: 12), maxLines: 4, overflow: TextOverflow.ellipsis),
                   ],
                 ],
               ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Instagram and TikTok don\'t share captions automatically. If the result is empty, paste the caption below:',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _textCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Caption / recipe text (optional)',
+                prefixIcon: Icon(Icons.text_snippet_outlined),
+                alignLabelWithHint: true,
+              ),
+              maxLines: 5,
             ),
           ],
           if (_error != null) ...[

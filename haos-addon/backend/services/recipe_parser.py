@@ -38,17 +38,42 @@ Rules:
 """
 
 
+import re
+
 async def fetch_url_text(url: str) -> str:
-    """Attempt to fetch plain text from a URL (best-effort, works for recipe websites)."""
+    """Fetch plain text from a URL (best-effort)."""
     try:
         async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client_http:
             resp = await client_http.get(url, headers={"User-Agent": "Mozilla/5.0"})
             resp.raise_for_status()
-            # Very naive text extraction: strip HTML tags
-            import re
             text = re.sub(r"<[^>]+>", " ", resp.text)
             text = re.sub(r"\s+", " ", text).strip()
-            return text[:8000]  # Limit context size
+            return text[:8000]
+    except Exception:
+        return ""
+
+
+async def fetch_og_tags(url: str) -> str:
+    """Extract Open Graph meta tags from a URL — works on many public Instagram/TikTok posts."""
+    try:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client_http:
+            resp = await client_http.get(url, headers={
+                "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1)",
+            })
+            html = resp.text
+        tags = {}
+        for m in re.finditer(r'<meta[^>]+property=["\']og:(\w+)["\'][^>]+content=["\']([^"\']+)["\']', html, re.I):
+            tags[m.group(1)] = m.group(2)
+        for m in re.finditer(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:(\w+)["\']', html, re.I):
+            tags[m.group(2)] = m.group(1)
+        if not tags:
+            return ""
+        parts = []
+        if "title" in tags:
+            parts.append(f"Title: {tags['title']}")
+        if "description" in tags:
+            parts.append(f"Description: {tags['description']}")
+        return "\n".join(parts)
     except Exception:
         return ""
 
@@ -62,8 +87,12 @@ async def parse_recipe(text: str | None, url: str | None, platform: str | None) 
 
     if url:
         content_parts.append(f"Source URL: {url}")
-        # For non-social platforms, try fetching the page
-        if platform not in ("instagram", "tiktok") and url:
+        if platform in ("instagram", "tiktok"):
+            # Full page fetch is blocked; try OG tags which are often public
+            og = await fetch_og_tags(url)
+            if og:
+                content_parts.append(f"Post metadata:\n{og}")
+        else:
             fetched = await fetch_url_text(url)
             if fetched:
                 content_parts.append(f"Page content (truncated):\n{fetched}")
