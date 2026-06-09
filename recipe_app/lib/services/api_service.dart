@@ -5,7 +5,7 @@ import '../models/recipe.dart';
 
 class ApiService {
   static const String _baseUrlKey = 'api_base_url';
-  static const String _defaultBaseUrl = 'http://192.168.1.100:8000';
+  static const String _defaultBaseUrl = 'http://192.168.1.134:8000';
 
   static Future<String> get baseUrl async {
     final prefs = await SharedPreferences.getInstance();
