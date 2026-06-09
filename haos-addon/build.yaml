@@ -1,4 +1,1 @@
-build_from:
-  aarch64: "python:3.12-alpine"
-  amd64: "python:3.12-alpine"
-  armv7: "python:3.12-alpine"
+build_from: "ghcr.io/home-assistant/base-python:3.12.9"
