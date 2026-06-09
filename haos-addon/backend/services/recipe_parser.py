@@ -3,6 +3,7 @@ Uses Claude API to parse raw shared content (Instagram/TikTok captions, URLs)
 into the standard recipe format.
 """
 import json
+import re
 import httpx
 from anthropic import Anthropic
 from ..config import settings
@@ -31,14 +32,12 @@ Always respond with a valid JSON object matching this exact schema:
 Rules:
 - Extract as much information as possible from the raw text.
 - If the text is not a recipe, return {"name": "Unknown Recipe", "ingredients": [], "steps": [], ...} with all other fields null/empty.
-- For ingredients, always split amount, unit, and item (e.g. "2 cups flour" → amount:"2", unit:"cups", item:"flour").
+- For ingredients, always split amount, unit, and item (e.g. "2 cups flour" -> amount:"2", unit:"cups", item:"flour").
 - Steps should be in order, one per array element.
 - Do not invent information not present in the source.
 - Return ONLY the JSON object, no markdown, no explanation.
 """
 
-
-import re
 
 async def fetch_url_text(url: str) -> str:
     """Fetch plain text from a URL (best-effort)."""
@@ -54,7 +53,7 @@ async def fetch_url_text(url: str) -> str:
 
 
 async def fetch_og_tags(url: str) -> str:
-    """Extract Open Graph meta tags from a URL — works on many public Instagram/TikTok posts."""
+    """Extract Open Graph meta tags from a URL."""
     try:
         async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client_http:
             resp = await client_http.get(url, headers={
@@ -78,8 +77,8 @@ async def fetch_og_tags(url: str) -> str:
         return ""
 
 
-async def fetch_video_description(url: str) -> str:
-    """Use yt-dlp to extract the caption/description from an Instagram or TikTok video URL."""
+async def fetch_video_metadata(url: str) -> dict:
+    """Use yt-dlp to extract caption and thumbnail from an Instagram or TikTok video URL."""
     try:
         import yt_dlp
         import asyncio
@@ -88,7 +87,6 @@ async def fetch_video_description(url: str) -> str:
             "quiet": True,
             "no_warnings": True,
             "skip_download": True,
-            "extract_flat": False,
         }
 
         def _extract():
@@ -101,14 +99,16 @@ async def fetch_video_description(url: str) -> str:
                     parts.append(f"Caption:\n{info['description']}")
                 if info.get("uploader"):
                     parts.append(f"Author: {info['uploader']}")
-                return "\n\n".join(parts)
+                return {
+                    "text": "\n\n".join(parts),
+                    "thumbnail": info.get("thumbnail"),
+                }
 
-        # Run the blocking yt-dlp call in a thread pool
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _extract)
     except Exception as e:
         print(f"yt-dlp extraction failed for {url}: {e}")
-        return ""
+        return {"text": "", "thumbnail": None}
 
 
 async def parse_recipe(text: str | None, url: str | None, platform: str | None) -> dict:
@@ -117,14 +117,15 @@ async def parse_recipe(text: str | None, url: str | None, platform: str | None) 
     Returns a dict matching RecipeCreate schema.
     """
     content_parts = []
+    thumbnail_url = None
 
     if url:
         content_parts.append(f"Source URL: {url}")
         if platform in ("instagram", "tiktok"):
-            # Try yt-dlp first (extracts full caption), fall back to OG tags
-            video_desc = await fetch_video_description(url)
-            if video_desc:
-                content_parts.append(f"Post metadata:\n{video_desc}")
+            metadata = await fetch_video_metadata(url)
+            thumbnail_url = metadata.get("thumbnail")
+            if metadata["text"]:
+                content_parts.append(f"Post metadata:\n{metadata['text']}")
             else:
                 og = await fetch_og_tags(url)
                 if og:
@@ -151,7 +152,6 @@ async def parse_recipe(text: str | None, url: str | None, platform: str | None) 
 
     raw_json = message.content[0].text.strip()
 
-    # Strip markdown code fences if present
     if raw_json.startswith("```"):
         raw_json = raw_json.split("```")[1]
         if raw_json.startswith("json"):
@@ -160,8 +160,11 @@ async def parse_recipe(text: str | None, url: str | None, platform: str | None) 
 
     data = json.loads(raw_json)
 
-    # Inject source fields
     data["source_url"] = url
     data["source_platform"] = platform
+
+    # Use yt-dlp thumbnail if Claude didn't extract an image URL
+    if not data.get("image_url") and thumbnail_url:
+        data["image_url"] = thumbnail_url
 
     return data

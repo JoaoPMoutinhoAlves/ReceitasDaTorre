@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/recipe.dart';
 import '../services/api_service.dart';
@@ -22,15 +23,20 @@ class _HomeScreenState extends State<HomeScreen> {
   String _searchQuery = '';
   String? _selectedCategory;
   final TextEditingController _searchCtrl = TextEditingController();
+  Timer? _reloadTimer;
 
   @override
   void initState() {
     super.initState();
     _load();
+    _reloadTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted && !_loading) _load();
+    });
   }
 
   @override
   void dispose() {
+    _reloadTimer?.cancel();
     _searchCtrl.dispose();
     super.dispose();
   }
@@ -91,7 +97,6 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Column(
         children: [
-          // Search bar
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
             child: TextField(
@@ -104,7 +109,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
-          // Category chips
           if (_categories.isNotEmpty)
             SizedBox(
               height: 48,
@@ -129,7 +133,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
             ),
-          // Content
           Expanded(child: _buildBody()),
         ],
       ),
@@ -137,9 +140,7 @@ class _HomeScreenState extends State<HomeScreen> {
         onPressed: () async {
           final created = await Navigator.push<bool>(
             context,
-            MaterialPageRoute(
-              builder: (_) => const ImportScreen(),
-            ),
+            MaterialPageRoute(builder: (_) => const ImportScreen()),
           );
           if (created == true) _load();
         },
@@ -152,9 +153,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildBody() {
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator());
-    }
+    if (_loading) return const Center(child: CircularProgressIndicator());
+
     if (_error != null) {
       return Center(
         child: Column(
@@ -171,6 +171,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
     }
+
     if (_recipes.isEmpty) {
       return Center(
         child: Column(
@@ -189,33 +190,99 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
     }
+
+    // When a specific category is selected or searching: flat grid
+    if (_selectedCategory != null || _searchQuery.isNotEmpty) {
+      return RefreshIndicator(
+        onRefresh: _load,
+        child: GridView.builder(
+          padding: const EdgeInsets.all(12),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            mainAxisSpacing: 12,
+            crossAxisSpacing: 12,
+            childAspectRatio: 0.72,
+          ),
+          itemCount: _recipes.length,
+          itemBuilder: (context, i) => _recipeCard(_recipes[i]),
+        ),
+      );
+    }
+
+    // Default: grouped by category
     return RefreshIndicator(
       onRefresh: _load,
-      child: GridView.builder(
-        padding: const EdgeInsets.all(12),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          mainAxisSpacing: 12,
-          crossAxisSpacing: 12,
-          childAspectRatio: 0.72,
-        ),
-        itemCount: _recipes.length,
-        itemBuilder: (context, i) {
-          final recipe = _recipes[i];
-          return RecipeCard(
-            recipe: recipe,
-            onTap: () async {
-              final changed = await Navigator.push<bool>(
-                context,
-                MaterialPageRoute(builder: (_) => RecipeDetailScreen(recipe: recipe)),
-              );
-              if (changed == true) _load();
-            },
-          );
-        },
-      ),
+      child: _buildGroupedView(),
     );
   }
+
+  Widget _buildGroupedView() {
+    // Group recipes by category
+    final Map<String, List<Recipe>> grouped = {};
+    for (final recipe in _recipes) {
+      final cat = recipe.category ?? '';
+      grouped.putIfAbsent(cat, () => []).add(recipe);
+    }
+
+    // Order: known categories first (in API order), uncategorized last
+    final sections = <String>[
+      ..._categories.where(grouped.containsKey),
+      if (grouped.containsKey('')) '',
+    ];
+
+    return ListView.builder(
+      itemCount: sections.length,
+      itemBuilder: (context, i) {
+        final cat = sections[i];
+        final recipes = grouped[cat]!;
+        return _buildCategorySection(cat.isEmpty ? 'Other' : cat, recipes);
+      },
+    );
+  }
+
+  Widget _buildCategorySection(String title, List<Recipe> recipes) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+          child: Text(
+            title,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.onSurface,
+                ),
+          ),
+        ),
+        SizedBox(
+          height: 230,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            itemCount: recipes.length,
+            itemBuilder: (context, i) => SizedBox(
+              width: 160,
+              child: Padding(
+                padding: const EdgeInsets.only(right: 10),
+                child: _recipeCard(recipes[i]),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _recipeCard(Recipe recipe) => RecipeCard(
+        recipe: recipe,
+        onTap: () async {
+          final changed = await Navigator.push<bool>(
+            context,
+            MaterialPageRoute(builder: (_) => RecipeDetailScreen(recipe: recipe)),
+          );
+          if (changed == true) _load();
+        },
+      );
 }
 
 class _CategoryChip extends StatelessWidget {

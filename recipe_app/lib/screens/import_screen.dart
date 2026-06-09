@@ -37,16 +37,20 @@ class _ImportScreenState extends State<ImportScreen> {
   // Edit form controllers (populated after parsing)
   final _nameCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
-  final _categoryCtrl = TextEditingController();
   final _servingsCtrl = TextEditingController();
   final _prepCtrl = TextEditingController();
   final _cookCtrl = TextEditingController();
   final _ingredientsCtrl = TextEditingController();
   final _stepsCtrl = TextEditingController();
 
+  // Category
+  String? _selectedCategory;
+  List<String> _availableCategories = [];
+
   @override
   void initState() {
     super.initState();
+    _loadCategories();
     // Auto-trigger only when we have actual text content (not just a social URL)
     final hasCaptionText = widget.sharedText != null && widget.sharedText!.isNotEmpty;
     final isSocialUrl = widget.platform == 'instagram' || widget.platform == 'tiktok';
@@ -55,10 +59,17 @@ class _ImportScreenState extends State<ImportScreen> {
     }
   }
 
+  Future<void> _loadCategories() async {
+    try {
+      final cats = await ApiService.listCategories();
+      if (mounted) setState(() => _availableCategories = cats);
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
     for (final c in [
-      _urlCtrl, _textCtrl, _nameCtrl, _descCtrl, _categoryCtrl,
+      _urlCtrl, _textCtrl, _nameCtrl, _descCtrl,
       _servingsCtrl, _prepCtrl, _cookCtrl, _ingredientsCtrl, _stepsCtrl,
     ]) {
       c.dispose();
@@ -68,7 +79,6 @@ class _ImportScreenState extends State<ImportScreen> {
 
   Future<void> _triggerParse() async {
     final url = widget.sharedUrl ?? _urlCtrl.text.trim();
-    // Prefer manually typed caption over auto-detected text (user can correct it)
     final text = _textCtrl.text.trim().isNotEmpty
         ? _textCtrl.text.trim()
         : (widget.sharedText ?? '');
@@ -106,20 +116,24 @@ class _ImportScreenState extends State<ImportScreen> {
   void _populateEditForm(RecipeInput r) {
     _nameCtrl.text = r.name;
     _descCtrl.text = r.description ?? '';
-    _categoryCtrl.text = r.category ?? '';
     _servingsCtrl.text = r.servings?.toString() ?? '';
     _prepCtrl.text = r.prepTimeMinutes?.toString() ?? '';
     _cookCtrl.text = r.cookTimeMinutes?.toString() ?? '';
     _ingredientsCtrl.text = r.ingredients.map((i) => i.display).join('\n');
     _stepsCtrl.text = r.steps.join('\n\n');
+    // Set category — add to available list if it's new
+    if (r.category != null && r.category!.isNotEmpty) {
+      _selectedCategory = r.category;
+      if (!_availableCategories.contains(r.category)) {
+        _availableCategories = [..._availableCategories, r.category!];
+      }
+    }
   }
 
   RecipeInput _buildFromForm() {
-    // Parse ingredients back from text (one per line)
     final ingredientLines = _ingredientsCtrl.text.trim().split('\n').where((l) => l.trim().isNotEmpty);
     final ingredients = ingredientLines.map((line) => Ingredient(item: line.trim())).toList();
 
-    // Parse steps (separated by blank lines or newlines)
     final steps = _stepsCtrl.text
         .trim()
         .split('\n')
@@ -130,7 +144,7 @@ class _ImportScreenState extends State<ImportScreen> {
     return RecipeInput(
       name: _nameCtrl.text.trim(),
       description: _descCtrl.text.trim().isNotEmpty ? _descCtrl.text.trim() : null,
-      category: _categoryCtrl.text.trim().isNotEmpty ? _categoryCtrl.text.trim() : null,
+      category: _selectedCategory,
       servings: int.tryParse(_servingsCtrl.text.trim()),
       prepTimeMinutes: int.tryParse(_prepCtrl.text.trim()),
       cookTimeMinutes: int.tryParse(_cookCtrl.text.trim()),
@@ -172,6 +186,39 @@ class _ImportScreenState extends State<ImportScreen> {
           actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
         ),
       );
+    }
+  }
+
+  Future<void> _showNewCategoryDialog() async {
+    final ctrl = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('New category'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: 'e.g. Breakfast, Dinner…'),
+          textCapitalization: TextCapitalization.words,
+          onSubmitted: (v) => Navigator.pop(context, v.trim()),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, ctrl.text.trim()),
+            child: const Text('Add'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (result != null && result.isNotEmpty && mounted) {
+      setState(() {
+        if (!_availableCategories.contains(result)) {
+          _availableCategories = [..._availableCategories, result];
+        }
+        _selectedCategory = result;
+      });
     }
   }
 
@@ -233,7 +280,6 @@ class _ImportScreenState extends State<ImportScreen> {
               maxLines: 5,
             ),
           ] else ...[
-            // Auto-share: show what was captured
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
@@ -319,7 +365,7 @@ class _ImportScreenState extends State<ImportScreen> {
           const SizedBox(height: 16),
           _field(_nameCtrl, 'Name', required: true),
           const SizedBox(height: 12),
-          _field(_categoryCtrl, 'Category', hint: 'e.g. Breakfast, Dinner, Dessert'),
+          _categoryDropdown(),
           const SizedBox(height: 12),
           _field(_descCtrl, 'Description', maxLines: 3),
           const SizedBox(height: 12),
@@ -344,10 +390,6 @@ class _ImportScreenState extends State<ImportScreen> {
           Text('One step per line', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey)),
           const SizedBox(height: 8),
           _field(_stepsCtrl, 'Steps', maxLines: 10),
-          if (_error != null) ...[
-            const SizedBox(height: 12),
-            Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 13)),
-          ],
           const SizedBox(height: 24),
           SizedBox(
             width: double.infinity,
@@ -364,6 +406,48 @@ class _ImportScreenState extends State<ImportScreen> {
           const SizedBox(height: 40),
         ],
       ),
+    );
+  }
+
+  Widget _categoryDropdown() {
+    return DropdownButtonFormField<String>(
+      value: _selectedCategory,
+      decoration: InputDecoration(
+        labelText: 'Category',
+        filled: true,
+        fillColor: Colors.white,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: Color(0xFFEEE0D4)),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: Color(0xFFEEE0D4)),
+        ),
+      ),
+      hint: const Text('Select category'),
+      items: [
+        ..._availableCategories.map(
+          (cat) => DropdownMenuItem(value: cat, child: Text(cat)),
+        ),
+        const DropdownMenuItem(
+          value: '__new__',
+          child: Row(
+            children: [
+              Icon(Icons.add, size: 16, color: AppTheme.primary),
+              SizedBox(width: 6),
+              Text('New category…', style: TextStyle(color: AppTheme.primary)),
+            ],
+          ),
+        ),
+      ],
+      onChanged: (val) {
+        if (val == '__new__') {
+          _showNewCategoryDialog();
+        } else {
+          setState(() => _selectedCategory = val);
+        }
+      },
     );
   }
 
