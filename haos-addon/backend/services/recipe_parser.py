@@ -78,6 +78,39 @@ async def fetch_og_tags(url: str) -> str:
         return ""
 
 
+async def fetch_video_description(url: str) -> str:
+    """Use yt-dlp to extract the caption/description from an Instagram or TikTok video URL."""
+    try:
+        import yt_dlp
+        import asyncio
+
+        opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+            "extract_flat": False,
+        }
+
+        def _extract():
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                parts = []
+                if info.get("title"):
+                    parts.append(f"Title: {info['title']}")
+                if info.get("description"):
+                    parts.append(f"Caption:\n{info['description']}")
+                if info.get("uploader"):
+                    parts.append(f"Author: {info['uploader']}")
+                return "\n\n".join(parts)
+
+        # Run the blocking yt-dlp call in a thread pool
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _extract)
+    except Exception as e:
+        print(f"yt-dlp extraction failed for {url}: {e}")
+        return ""
+
+
 async def parse_recipe(text: str | None, url: str | None, platform: str | None) -> dict:
     """
     Call Claude to extract a structured recipe from raw text and/or URL.
@@ -88,10 +121,14 @@ async def parse_recipe(text: str | None, url: str | None, platform: str | None) 
     if url:
         content_parts.append(f"Source URL: {url}")
         if platform in ("instagram", "tiktok"):
-            # Full page fetch is blocked; try OG tags which are often public
-            og = await fetch_og_tags(url)
-            if og:
-                content_parts.append(f"Post metadata:\n{og}")
+            # Try yt-dlp first (extracts full caption), fall back to OG tags
+            video_desc = await fetch_video_description(url)
+            if video_desc:
+                content_parts.append(f"Post metadata:\n{video_desc}")
+            else:
+                og = await fetch_og_tags(url)
+                if og:
+                    content_parts.append(f"Post metadata:\n{og}")
         else:
             fetched = await fetch_url_text(url)
             if fetched:
