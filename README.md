@@ -4,41 +4,58 @@ A multi-platform recipe manager with AI-powered import from Instagram, TikTok, a
 
 ## Architecture
 
-- **Backend**: FastAPI + PostgreSQL, runs on your Raspberry Pi via Docker
+- **Backend**: FastAPI + SQLite, runs as a native Home Assistant add-on (no Docker setup needed)
 - **App**: Flutter (Android + Web)
 - **AI parsing**: Claude API — converts shared captions/text into structured recipes
 
 ---
 
-## 1. Deploy the backend to Raspberry Pi
+## 1. Install the backend on Home Assistant OS
 
 ### Prerequisites
-- Docker and Docker Compose installed on the Pi
 - A Claude API key from [console.anthropic.com](https://console.anthropic.com)
+- Access to your Pi's `/config` folder (via Samba, SFTP, or the File Editor add-on)
 
 ### Steps
 
-```bash
-# 1. Copy the project to your Pi (or clone from git)
-scp -r . pi@<PI_IP>:~/recipe-manager
+**1. Copy the add-on folder to your Pi**
 
-# 2. Create your .env file
-cd ~/recipe-manager
-cp .env.example .env
-nano .env   # Set your CLAUDE_API_KEY
+Copy the `haos-addon/` folder from this repo into your HA config directory under `addons/local/`:
 
-# 3. Start the services
-docker compose up -d
-
-# 4. Verify
-curl http://localhost:8000/health
-# → {"status":"ok"}
+```
+/config/addons/local/recipe_manager/   ← put the contents of haos-addon/ here
 ```
 
-The API will be available at `http://<PI_IP>:8000`.
+The easiest ways to do this:
+- **Samba add-on**: Enable it in HA, then copy via Windows Explorer to `\\<PI_IP>\config\addons\local\recipe_manager\`
+- **SFTP**: `scp -r haos-addon/ pi@<PI_IP>:/config/addons/local/recipe_manager/`
+- **File Editor add-on**: Upload files one by one through the HA UI
 
-> **Tip**: Make sure port 8000 is accessible on your local network.
-> On Home Assistant OS, you can use the "Terminal & SSH" add-on to run the commands above.
+**2. Reload add-ons in Home Assistant**
+
+Go to **Settings → Add-ons → Add-on Store**, click the **⋮ menu** (top-right) → **Check for updates** (or **Reload**).
+
+You should now see **Recipe Manager** under **Local add-ons**.
+
+**3. Configure your API key**
+
+Click **Recipe Manager → Configuration tab** and set:
+- `claude_api_key`: your Anthropic API key
+- `claude_model`: `claude-opus-4-6` (default, leave as-is)
+
+**4. Start the add-on**
+
+Go to the **Info tab** and click **Start**. Enable **Start on boot** and **Watchdog** while you're there.
+
+Check the **Log tab** — you should see:
+```
+INFO: Starting Recipe Manager...
+INFO: API will be available on port 8000
+```
+
+The API is now at `http://<PI_IP>:8000`. The SQLite database is stored at `/data/recipes.db` inside the add-on and persists across restarts and updates.
+
+> **Tip**: Interactive API docs are available at `http://<PI_IP>:8000/docs`
 
 ---
 
