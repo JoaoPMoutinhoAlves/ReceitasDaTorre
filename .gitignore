@@ -1,0 +1,34 @@
+# Python / backend
+__pycache__/
+*.py[cod]
+*.egg-info/
+.env
+.venv/
+venv/
+
+# Docker
+*.log
+
+# Flutter / Dart
+recipe_app/.dart_tool/
+recipe_app/.flutter-plugins
+recipe_app/.flutter-plugins-dependencies
+recipe_app/build/
+recipe_app/.packages
+recipe_app/pubspec.lock
+
+# Android
+recipe_app/android/.gradle/
+recipe_app/android/local.properties
+recipe_app/android/key.properties
+*.jks
+*.keystore
+
+# IDEs
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
