@@ -77,8 +77,67 @@ async def fetch_og_tags(url: str) -> str:
         return ""
 
 
-async def fetch_video_metadata(url: str) -> dict:
-    """Use yt-dlp to extract caption and thumbnail from an Instagram or TikTok video URL."""
+async def fetch_tiktok_oembed(url: str) -> dict:
+    """Use TikTok's public oEmbed API — works for videos AND photo/slideshow posts without auth."""
+    try:
+        oembed_url = f"https://www.tiktok.com/oembed?url={url}"
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as c:
+            resp = await c.get(oembed_url, headers={"User-Agent": "Mozilla/5.0"})
+            resp.raise_for_status()
+            data = resp.json()
+        parts = []
+        if data.get("title"):
+            parts.append(f"Caption: {data['title']}")
+        if data.get("author_name"):
+            parts.append(f"Author: {data['author_name']}")
+        return {
+            "text": "\n".join(parts),
+            "thumbnail": data.get("thumbnail_url"),
+        }
+    except Exception as e:
+        print(f"TikTok oEmbed failed: {e}")
+        return {"text": "", "thumbnail": None}
+
+
+async def fetch_instagram_oembed(url: str) -> dict:
+    """Use Instagram's public oEmbed API to get caption and thumbnail."""
+    try:
+        oembed_url = f"https://api.instagram.com/oembed/?url={url}"
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as c:
+            resp = await c.get(oembed_url, headers={"User-Agent": "Mozilla/5.0"})
+            resp.raise_for_status()
+            data = resp.json()
+        parts = []
+        if data.get("title"):
+            parts.append(f"Caption: {data['title']}")
+        if data.get("author_name"):
+            parts.append(f"Author: {data['author_name']}")
+        return {
+            "text": "\n".join(parts),
+            "thumbnail": data.get("thumbnail_url"),
+        }
+    except Exception as e:
+        print(f"Instagram oEmbed failed: {e}")
+        return {"text": "", "thumbnail": None}
+
+
+async def fetch_video_metadata(url: str, platform: str | None) -> dict:
+    """
+    Extract caption and thumbnail from a social media URL.
+    Strategy: oEmbed (most reliable) → yt-dlp (full description) → OG tags (fallback)
+    """
+    # 1. Try platform-specific oEmbed API first (works for all post types, no auth needed)
+    if platform == "tiktok" or "tiktok.com" in url:
+        result = await fetch_tiktok_oembed(url)
+        if result["text"] or result["thumbnail"]:
+            return result
+
+    if platform == "instagram" or "instagram.com" in url:
+        result = await fetch_instagram_oembed(url)
+        if result["text"] or result["thumbnail"]:
+            return result
+
+    # 2. Try yt-dlp (gets full description for videos)
     try:
         import yt_dlp
         import asyncio
@@ -105,10 +164,15 @@ async def fetch_video_metadata(url: str) -> dict:
                 }
 
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, _extract)
+        result = await loop.run_in_executor(None, _extract)
+        if result["text"] or result["thumbnail"]:
+            return result
     except Exception as e:
         print(f"yt-dlp extraction failed for {url}: {e}")
-        return {"text": "", "thumbnail": None}
+
+    # 3. OG tags as last resort
+    og = await fetch_og_tags(url)
+    return {"text": og, "thumbnail": None}
 
 
 async def parse_recipe(text: str | None, url: str | None, platform: str | None) -> dict:
@@ -122,14 +186,10 @@ async def parse_recipe(text: str | None, url: str | None, platform: str | None) 
     if url:
         content_parts.append(f"Source URL: {url}")
         if platform in ("instagram", "tiktok"):
-            metadata = await fetch_video_metadata(url)
+            metadata = await fetch_video_metadata(url, platform)
             thumbnail_url = metadata.get("thumbnail")
             if metadata["text"]:
                 content_parts.append(f"Post metadata:\n{metadata['text']}")
-            else:
-                og = await fetch_og_tags(url)
-                if og:
-                    content_parts.append(f"Post metadata:\n{og}")
         else:
             fetched = await fetch_url_text(url)
             if fetched:
