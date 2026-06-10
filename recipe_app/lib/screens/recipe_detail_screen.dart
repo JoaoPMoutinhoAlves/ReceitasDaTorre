@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/recipe.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
+import 'recipe_scale_screen.dart';
 
 class RecipeDetailScreen extends StatefulWidget {
   final Recipe recipe;
@@ -80,6 +81,17 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
                   )
                 : null,
             actions: [
+              if (_recipe.ingredients.isNotEmpty)
+                IconButton(
+                  icon: const Icon(Icons.scale_outlined),
+                  tooltip: 'Adjust servings',
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => RecipeScaleScreen(recipe: _recipe),
+                    ),
+                  ),
+                ),
               if (_recipe.sourceUrl != null)
                 IconButton(
                   icon: const Icon(Icons.open_in_new),
