@@ -1,6 +1,6 @@
 name: "Recipe Manager"
 description: "AI-powered recipe manager backend. Parses Instagram/TikTok captions into structured recipes using Claude API."
-version: "1.0.4"
+version: "1.0.5"
 slug: "recipe_manager"
 init: false
 

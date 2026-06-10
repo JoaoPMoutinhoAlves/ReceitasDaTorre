@@ -16,7 +16,7 @@ Always respond with a valid JSON object matching this exact schema:
 {
   "name": "string (required, recipe title)",
   "description": "string or null",
-  "category": "string or null (e.g. Breakfast, Lunch, Dinner, Dessert, Snack, Drink, Sauce, Other)",
+  "category": "string or null (e.g. Pequeno-almoço, Almoço, Jantar, Sobremesa, Lanche, Bebida, Molho, Outro)",
   "tags": ["string"],
   "ingredients": [
     {"amount": "string or null", "unit": "string or null", "item": "string (required)", "note": "string or null"}
@@ -31,11 +31,24 @@ Always respond with a valid JSON object matching this exact schema:
 
 Rules:
 - Extract as much information as possible from the raw text.
-- If the text is not a recipe, return {"name": "Unknown Recipe", "ingredients": [], "steps": [], ...} with all other fields null/empty.
+- If the text is not a recipe, return {"name": "Receita Desconhecida", "ingredients": [], "steps": [], ...} with all other fields null/empty.
 - For ingredients, always split amount, unit, and item (e.g. "2 cups flour" -> amount:"2", unit:"cups", item:"flour").
 - Steps should be in order, one per array element.
 - Do not invent information not present in the source.
 - Return ONLY the JSON object, no markdown, no explanation.
+
+Language:
+- Always write ALL text fields (name, description, category, tags, ingredient items and notes, steps) in European Portuguese (Portugal), not Brazilian Portuguese.
+- Use European Portuguese vocabulary and spelling (e.g. "ananas" not "abacaxi", "frigorifico" not "geladeira", "pequeno-almoco" not "cafe da manha").
+- If the source is already in European Portuguese, keep it as-is.
+- If the source is in any other language (English, Spanish, Brazilian Portuguese, etc.), translate everything into European Portuguese.
+
+Measurements:
+- Convert all volume measurements to millilitres (ml) or litres (l): 1 cup = 240 ml, 1 tbsp = 15 ml, 1 tsp = 5 ml, 1 fl oz = 30 ml, 1 pint = 475 ml.
+- Convert all weight measurements to grams (g) or kilograms (kg): 1 oz = 28 g, 1 lb = 454 g.
+- Round to clean numbers where sensible (e.g. 240 ml not 236.6 ml).
+- For items with no sensible metric equivalent (e.g. "2 ovos", "1 pitada de sal", "a gosto"), keep the original unit.
+- Put the numeric amount in the "amount" field and the unit (g, ml, l, kg) in the "unit" field.
 """
 
 
