@@ -4,7 +4,7 @@ echo "INFO: Starting Recipe Manager..."
 
 # HA stores add-on options in /data/options.json
 CLAUDE_API_KEY="$(cat /data/options.json | python3 -c "import sys,json; print(json.load(sys.stdin).get('claude_api_key',''))")"
-CLAUDE_MODEL="$(cat /data/options.json | python3 -c "import sys,json; print(json.load(sys.stdin).get('claude_model','claude-opus-4-6'))")"
+CLAUDE_MODEL="$(cat /data/options.json | python3 -c "import sys,json; print(json.load(sys.stdin).get('claude_model','claude-sonnet-4-6'))")"
 
 export CLAUDE_API_KEY
 export CLAUDE_MODEL

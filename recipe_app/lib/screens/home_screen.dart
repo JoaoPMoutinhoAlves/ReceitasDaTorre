@@ -84,6 +84,10 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('Receitas', style: TextStyle(fontWeight: FontWeight.w800)),
         actions: [
           IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _load,
+          ),
+          IconButton(
             icon: const Icon(Icons.settings_outlined),
             onPressed: () async {
               await Navigator.push(

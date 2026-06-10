@@ -11,7 +11,7 @@ arch:
 
 options:
   claude_api_key: ""
-  claude_model: "claude-opus-4-6"
+  claude_model: "claude-sonnet-4-6"
 
 schema:
   claude_api_key: str
