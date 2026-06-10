@@ -77,25 +77,67 @@ async def fetch_og_tags(url: str) -> str:
         return ""
 
 
-async def fetch_tiktok_oembed(url: str) -> dict:
-    """Use TikTok's public oEmbed API — works for videos AND photo/slideshow posts without auth."""
+async def resolve_url(url: str) -> str:
+    """Follow redirects to get the canonical URL (handles vm.tiktok.com short links etc.)."""
     try:
-        oembed_url = f"https://www.tiktok.com/oembed?url={url}"
         async with httpx.AsyncClient(timeout=10, follow_redirects=True) as c:
-            resp = await c.get(oembed_url, headers={"User-Agent": "Mozilla/5.0"})
-            resp.raise_for_status()
-            data = resp.json()
-        parts = []
-        if data.get("title"):
-            parts.append(f"Caption: {data['title']}")
-        if data.get("author_name"):
-            parts.append(f"Author: {data['author_name']}")
-        return {
-            "text": "\n".join(parts),
-            "thumbnail": data.get("thumbnail_url"),
+            resp = await c.head(url, headers={"User-Agent": "Mozilla/5.0"})
+            return str(resp.url)
+    except Exception:
+        return url
+
+
+async def fetch_tiktok_page(url: str) -> dict:
+    """
+    Scrape TikTok page HTML for caption and thumbnail.
+    Works for both /video/ and /photo/ posts by parsing the
+    __UNIVERSAL_DATA_FOR_REHYDRATION__ JSON blob TikTok embeds in every page.
+    """
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
         }
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as c:
+            resp = await c.get(url, headers=headers)
+            html = resp.text
+
+        # Extract the embedded JSON data blob
+        match = re.search(
+            r'<script[^>]*id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)</script>',
+            html, re.S
+        )
+        if not match:
+            return {"text": "", "thumbnail": None}
+
+        data = json.loads(match.group(1))
+        scope = data.get("__DEFAULT_SCOPE__", {})
+        item = (scope.get("webapp.video-detail", {})
+                     .get("itemInfo", {})
+                     .get("itemStruct", {}))
+
+        if not item:
+            return {"text": "", "thumbnail": None}
+
+        parts = []
+        desc = item.get("desc", "")
+        if desc:
+            parts.append(f"Caption: {desc}")
+        author = item.get("author", {}).get("nickname", "")
+        if author:
+            parts.append(f"Author: {author}")
+
+        # Thumbnail: video cover or first image in a photo post
+        thumbnail = item.get("video", {}).get("cover", "")
+        if not thumbnail:
+            images = item.get("imagePost", {}).get("images", [])
+            if images:
+                url_list = images[0].get("imageURL", {}).get("urlList", [])
+                thumbnail = url_list[0] if url_list else ""
+
+        return {"text": "\n".join(parts), "thumbnail": thumbnail or None}
     except Exception as e:
-        print(f"TikTok oEmbed failed: {e}")
+        print(f"TikTok page scraping failed: {e}")
         return {"text": "", "thumbnail": None}
 
 
@@ -112,10 +154,7 @@ async def fetch_instagram_oembed(url: str) -> dict:
             parts.append(f"Caption: {data['title']}")
         if data.get("author_name"):
             parts.append(f"Author: {data['author_name']}")
-        return {
-            "text": "\n".join(parts),
-            "thumbnail": data.get("thumbnail_url"),
-        }
+        return {"text": "\n".join(parts), "thumbnail": data.get("thumbnail_url")}
     except Exception as e:
         print(f"Instagram oEmbed failed: {e}")
         return {"text": "", "thumbnail": None}
@@ -124,33 +163,35 @@ async def fetch_instagram_oembed(url: str) -> dict:
 async def fetch_video_metadata(url: str, platform: str | None) -> dict:
     """
     Extract caption and thumbnail from a social media URL.
-    Strategy: oEmbed (most reliable) → yt-dlp (full description) → OG tags (fallback)
+    Strategy:
+      TikTok: resolve URL → scrape page HTML (works for /video/ and /photo/)
+      Instagram: oEmbed → yt-dlp → OG tags
     """
-    # 1. Try platform-specific oEmbed API first (works for all post types, no auth needed)
-    if platform == "tiktok" or "tiktok.com" in url:
-        result = await fetch_tiktok_oembed(url)
+    # Always resolve short links (vm.tiktok.com, etc.) first
+    resolved = await resolve_url(url)
+    print(f"Resolved URL: {url} -> {resolved}")
+
+    if platform == "tiktok" or "tiktok.com" in resolved:
+        # Page scraping is the most reliable for TikTok (handles photos + videos)
+        result = await fetch_tiktok_page(resolved)
         if result["text"] or result["thumbnail"]:
             return result
 
-    if platform == "instagram" or "instagram.com" in url:
-        result = await fetch_instagram_oembed(url)
+    if platform == "instagram" or "instagram.com" in resolved:
+        result = await fetch_instagram_oembed(resolved)
         if result["text"] or result["thumbnail"]:
             return result
 
-    # 2. Try yt-dlp (gets full description for videos)
+    # Try yt-dlp (good for video posts on both platforms)
     try:
         import yt_dlp
         import asyncio
 
-        opts = {
-            "quiet": True,
-            "no_warnings": True,
-            "skip_download": True,
-        }
+        opts = {"quiet": True, "no_warnings": True, "skip_download": True}
 
         def _extract():
             with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(url, download=False)
+                info = ydl.extract_info(resolved, download=False)
                 parts = []
                 if info.get("title"):
                     parts.append(f"Title: {info['title']}")
@@ -158,20 +199,17 @@ async def fetch_video_metadata(url: str, platform: str | None) -> dict:
                     parts.append(f"Caption:\n{info['description']}")
                 if info.get("uploader"):
                     parts.append(f"Author: {info['uploader']}")
-                return {
-                    "text": "\n\n".join(parts),
-                    "thumbnail": info.get("thumbnail"),
-                }
+                return {"text": "\n\n".join(parts), "thumbnail": info.get("thumbnail")}
 
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(None, _extract)
         if result["text"] or result["thumbnail"]:
             return result
     except Exception as e:
-        print(f"yt-dlp extraction failed for {url}: {e}")
+        print(f"yt-dlp extraction failed for {resolved}: {e}")
 
-    # 3. OG tags as last resort
-    og = await fetch_og_tags(url)
+    # Last resort: OG tags
+    og = await fetch_og_tags(resolved)
     return {"text": og, "thumbnail": None}
 
 
