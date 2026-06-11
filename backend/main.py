@@ -1,8 +1,10 @@
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import Optional
+import httpx
 
 from .database import engine, get_db
 from . import models, schemas
@@ -123,6 +125,20 @@ def update_recipe(recipe_id: str, recipe_in: schemas.RecipeUpdate, db: Session =
     db.commit()
     db.refresh(recipe)
     return recipe
+
+
+@app.get("/api/proxy-image")
+async def proxy_image(url: str):
+    """Proxy external image requests to bypass browser CORS restrictions."""
+    async with httpx.AsyncClient(follow_redirects=True, timeout=10) as client:
+        try:
+            resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+            if resp.status_code == 200:
+                content_type = resp.headers.get("content-type", "image/jpeg")
+                return Response(content=resp.content, media_type=content_type)
+        except Exception:
+            pass
+    raise HTTPException(status_code=404, detail="Image not found")
 
 
 @app.delete("/api/recipes/{recipe_id}", status_code=204)

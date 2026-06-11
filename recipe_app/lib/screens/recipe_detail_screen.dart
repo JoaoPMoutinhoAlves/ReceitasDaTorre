@@ -3,6 +3,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/recipe.dart';
 import '../services/api_service.dart';
+import '../services/pdf_export_service.dart';
 import '../theme/app_theme.dart';
 import 'recipe_scale_screen.dart';
 
@@ -55,6 +56,18 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
     }
   }
 
+  Future<void> _exportPdf() async {
+    try {
+      await PdfExportService.exportRecipes([_recipe]);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to generate PDF: $e')),
+        );
+      }
+    }
+  }
+
   Future<void> _openSource() async {
     if (_recipe.sourceUrl == null) return;
     final uri = Uri.parse(_recipe.sourceUrl!);
@@ -92,6 +105,11 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
                     ),
                   ),
                 ),
+              IconButton(
+                icon: const Icon(Icons.print_outlined),
+                tooltip: 'Export as PDF',
+                onPressed: _exportPdf,
+              ),
               if (_recipe.sourceUrl != null)
                 IconButton(
                   icon: const Icon(Icons.open_in_new),

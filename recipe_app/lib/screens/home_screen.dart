@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import '../models/recipe.dart';
 import '../services/api_service.dart';
+import '../services/pdf_export_service.dart';
 import '../widgets/recipe_card.dart';
 import '../theme/app_theme.dart';
 import 'recipe_detail_screen.dart';
@@ -84,6 +86,11 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('Receitas', style: TextStyle(fontWeight: FontWeight.w800)),
         actions: [
           IconButton(
+            icon: const Icon(Icons.print_outlined),
+            tooltip: 'Export recipes as PDF',
+            onPressed: _recipes.isEmpty ? null : _showExportSheet,
+          ),
+          IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _load,
           ),
@@ -155,6 +162,150 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+
+  void _showExportSheet() {
+    final selected = <String>{};
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.65,
+          maxChildSize: 0.92,
+          minChildSize: 0.4,
+          builder: (ctx, scrollCtrl) => Column(
+            children: [
+              // Handle
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: Row(
+                  children: [
+                    const Text(
+                      'Select recipes to print',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                    ),
+                    const Spacer(),
+                    TextButton(
+                      onPressed: () => setSheetState(() {
+                        if (selected.length == _recipes.length) {
+                          selected.clear();
+                        } else {
+                          selected.addAll(_recipes.map((r) => r.id));
+                        }
+                      }),
+                      child: Text(
+                        selected.length == _recipes.length ? 'None' : 'All',
+                        style: const TextStyle(color: AppTheme.primary),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: ListView.builder(
+                  controller: scrollCtrl,
+                  itemCount: _recipes.length,
+                  itemBuilder: (ctx, i) {
+                    final r = _recipes[i];
+                    final isSelected = selected.contains(r.id);
+                    return CheckboxListTile(
+                      value: isSelected,
+                      activeColor: AppTheme.primary,
+                      onChanged: (v) => setSheetState(() {
+                        if (v == true) {
+                          selected.add(r.id);
+                        } else {
+                          selected.remove(r.id);
+                        }
+                      }),
+                      title: Text(r.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                      subtitle: Text(
+                        [if (r.category != null) r.category!, if (r.timeDisplay.isNotEmpty) r.timeDisplay]
+                            .join('  ·  '),
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      secondary: ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: r.imageUrl != null
+                            ? CachedNetworkImage(
+                                imageUrl: r.imageUrl!,
+                                width: 48,
+                                height: 48,
+                                fit: BoxFit.cover,
+                                errorWidget: (_, __, ___) => _imagePlaceholder(),
+                              )
+                            : _imagePlaceholder(),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const Divider(height: 1),
+              SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.primary,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      onPressed: selected.isEmpty
+                          ? null
+                          : () async {
+                              Navigator.pop(ctx);
+                              final toExport =
+                                  _recipes.where((r) => selected.contains(r.id)).toList();
+                              try {
+                                await PdfExportService.exportRecipes(toExport);
+                              } catch (e) {
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Failed to generate PDF: $e')),
+                                  );
+                                }
+                              }
+                            },
+                      icon: const Icon(Icons.picture_as_pdf_outlined),
+                      label: Text(
+                        selected.isEmpty
+                            ? 'Select at least one recipe'
+                            : 'Export ${selected.length} ${selected.length == 1 ? 'recipe' : 'recipes'}',
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _imagePlaceholder() => Container(
+        width: 48,
+        height: 48,
+        color: const Color(0xFFFCEEE4),
+        child: const Icon(Icons.restaurant_menu_outlined, size: 22, color: Color(0xFFE8632A)),
+      );
 
   Widget _buildBody() {
     if (_loading) return const Center(child: CircularProgressIndicator());
