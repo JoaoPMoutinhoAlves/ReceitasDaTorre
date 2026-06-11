@@ -13,41 +13,26 @@ class RecipeScaleScreen extends StatefulWidget {
 }
 
 class _RecipeScaleScreenState extends State<RecipeScaleScreen> {
-  late int _targetServings;
+  static const _multipliers = [0.25, 0.5, 1.0, 2.0, 4.0];
+  static const _labels = ['¼×', '½×', '1×', '2×', '4×'];
 
-  @override
-  void initState() {
-    super.initState();
-    _targetServings = widget.recipe.servings ?? 1;
-  }
+  double _multiplier = 1.0;
 
-  int get _originalServings => widget.recipe.servings ?? 1;
-
-  double get _scaleFactor {
-    if (_originalServings == 0) return 1;
-    return _targetServings / _originalServings;
-  }
-
-  void _adjust(int delta) {
-    final next = _targetServings + delta;
-    if (next < 1) return;
-    setState(() => _targetServings = next);
-  }
+  // ── Scaling helpers ──────────────────────────────────────────────────────
 
   String _scaleAmount(String? amount) {
     if (amount == null || amount.isEmpty) return '';
     final parsed = _parseAmount(amount);
     if (parsed == null) return amount;
-    final scaled = parsed * _scaleFactor;
-    return _formatAmount(scaled);
+    return _formatAmount(parsed * _multiplier);
   }
 
   double? _parseAmount(String s) {
     s = s.trim();
-    final unicodeMap = {
-      '½': 0.5, '⅓': 1 / 3, '⅔': 2 / 3, '¼': 0.25, '¾': 0.75,
-      '⅕': 0.2, '⅖': 0.4, '⅗': 0.6, '⅘': 0.8,
-      '⅙': 1 / 6, '⅚': 5 / 6, '⅛': 0.125, '⅜': 0.375, '⅝': 0.625, '⅞': 0.875,
+    const unicodeMap = {
+      '½': 0.5,  '⅓': 0.3333, '⅔': 0.6667, '¼': 0.25,  '¾': 0.75,
+      '⅕': 0.2,  '⅖': 0.4,    '⅗': 0.6,    '⅘': 0.8,
+      '⅙': 0.1667,'⅚': 0.8333,'⅛': 0.125,  '⅜': 0.375, '⅝': 0.625,'⅞': 0.875,
     };
     for (final entry in unicodeMap.entries) {
       if (s == entry.key) return entry.value;
@@ -57,56 +42,57 @@ class _RecipeScaleScreenState extends State<RecipeScaleScreen> {
         if (whole != null) return whole + entry.value;
       }
     }
-    // Mixed number: "2 1/2"
-    final mixedMatch = RegExp(r'^(\d+)\s+(\d+)/(\d+)$').firstMatch(s);
-    if (mixedMatch != null) {
-      final whole = double.parse(mixedMatch.group(1)!);
-      final num = double.parse(mixedMatch.group(2)!);
-      final den = double.parse(mixedMatch.group(3)!);
-      if (den != 0) return whole + num / den;
+    // Mixed: "2 1/2"
+    final mixed = RegExp(r'^(\d+)\s+(\d+)/(\d+)$').firstMatch(s);
+    if (mixed != null) {
+      final w = double.parse(mixed.group(1)!);
+      final n = double.parse(mixed.group(2)!);
+      final d = double.parse(mixed.group(3)!);
+      if (d != 0) return w + n / d;
     }
-    // Simple fraction: "1/2"
-    final fracMatch = RegExp(r'^(\d+)/(\d+)$').firstMatch(s);
-    if (fracMatch != null) {
-      final num = double.parse(fracMatch.group(1)!);
-      final den = double.parse(fracMatch.group(2)!);
-      if (den != 0) return num / den;
+    // Fraction: "1/2"
+    final frac = RegExp(r'^(\d+)/(\d+)$').firstMatch(s);
+    if (frac != null) {
+      final n = double.parse(frac.group(1)!);
+      final d = double.parse(frac.group(2)!);
+      if (d != 0) return n / d;
     }
     return double.tryParse(s);
   }
 
   String _formatAmount(double value) {
     if (value <= 0) return '0';
-    const tolerance = 0.04;
-    final fractions = [
-      (1 / 8, '1/8'), (1 / 4, '1/4'), (1 / 3, '1/3'), (3 / 8, '3/8'),
-      (1 / 2, '1/2'), (5 / 8, '5/8'), (2 / 3, '2/3'), (3 / 4, '3/4'),
-      (7 / 8, '7/8'),
+    const tol = 0.04;
+    const fractions = [
+      (0.125, '1/8'), (0.25, '1/4'), (0.3333, '1/3'), (0.375, '3/8'),
+      (0.5,   '1/2'), (0.625, '5/8'), (0.6667, '2/3'), (0.75,  '3/4'),
+      (0.875, '7/8'),
     ];
     final whole = value.floor();
-    final frac = value - whole;
+    final frac  = value - whole;
 
-    if (frac < tolerance) return '$whole';
-    if (frac > 1 - tolerance) return '${whole + 1}';
+    if (frac < tol)       return '$whole';
+    if (frac > 1 - tol)   return '${whole + 1}';
 
-    for (final (fracValue, fracStr) in fractions) {
-      if ((frac - fracValue).abs() < tolerance) {
-        return whole == 0 ? fracStr : '$whole $fracStr';
+    for (final (fv, fs) in fractions) {
+      if ((frac - fv).abs() < tol) {
+        return whole == 0 ? fs : '$whole $fs';
       }
     }
     return value.toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '');
   }
 
-  String _scaledIngredientDisplay(Ingredient ing) {
-    final scaledAmount = _scaleAmount(ing.amount);
+  String _scaledDisplay(Ingredient ing) {
     final parts = <String>[
-      if (scaledAmount.isNotEmpty) scaledAmount,
+      if (_scaleAmount(ing.amount).isNotEmpty) _scaleAmount(ing.amount),
       if (ing.unit != null) ing.unit!,
       ing.item,
       if (ing.note != null) '(${ing.note!})',
     ];
     return parts.join(' ');
   }
+
+  // ── Build ────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -118,7 +104,7 @@ class _RecipeScaleScreenState extends State<RecipeScaleScreen> {
           SliverAppBar(
             expandedHeight: recipe.imageUrl != null ? 260 : 0,
             pinned: true,
-            title: const Text('Ajustar Porções'),
+            title: const Text('Ajustar Receita'),
             flexibleSpace: recipe.imageUrl != null
                 ? FlexibleSpaceBar(
                     background: CachedNetworkImage(
@@ -144,14 +130,19 @@ class _RecipeScaleScreenState extends State<RecipeScaleScreen> {
                         ),
                   ),
                   const SizedBox(height: 20),
-                  _servingsPicker(context),
+                  _multiplierPicker(context),
                   const SizedBox(height: 28),
-                  if (recipe.ingredients.isNotEmpty) ...[
-                    _sectionTitle(context, 'Ingredientes'),
-                    for (final ing in recipe.ingredients)
-                      _ingredientRow(context, _scaledIngredientDisplay(ing)),
-                    const SizedBox(height: 24),
-                  ],
+
+                  // Keyed so Flutter fully recreates the subtree on multiplier change
+                  if (recipe.ingredients.isNotEmpty)
+                    _IngredientsSection(
+                      key: ValueKey(_multiplier),
+                      context: context,
+                      ingredients: recipe.ingredients
+                          .map((ing) => _scaledDisplay(ing))
+                          .toList(),
+                    ),
+
                   if (recipe.steps.isNotEmpty) ...[
                     _sectionTitle(context, 'Passos'),
                     for (int i = 0; i < recipe.steps.length; i++)
@@ -167,12 +158,11 @@ class _RecipeScaleScreenState extends State<RecipeScaleScreen> {
     );
   }
 
-  Widget _servingsPicker(BuildContext context) {
-    final original = widget.recipe.servings;
-    final isScaled = _targetServings != _originalServings;
+  // ── Multiplier picker ────────────────────────────────────────────────────
 
+  Widget _multiplierPicker(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
         color: const Color(0xFFFCEEE4),
         borderRadius: BorderRadius.circular(16),
@@ -182,20 +172,21 @@ class _RecipeScaleScreenState extends State<RecipeScaleScreen> {
         children: [
           Row(
             children: [
-              const Icon(Icons.people_outline, size: 18, color: AppTheme.primary),
-              const SizedBox(width: 8),
+              const Icon(Icons.tune, size: 16, color: AppTheme.primary),
+              const SizedBox(width: 6),
               Text(
-                'Porções',
+                'Multiplicador',
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w700,
                       color: AppTheme.primary,
                     ),
               ),
-              if (original != null) ...[
+              if (widget.recipe.servings != null) ...[
                 const Spacer(),
                 Text(
-                  'Original: $original',
-                  style: const TextStyle(fontSize: 12, color: Color(0xFF9E7B6B)),
+                  '${(widget.recipe.servings! * _multiplier).toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '')} porções',
+                  style: const TextStyle(
+                      fontSize: 12, color: Color(0xFF9E7B6B)),
                 ),
               ],
             ],
@@ -203,35 +194,10 @@ class _RecipeScaleScreenState extends State<RecipeScaleScreen> {
           const SizedBox(height: 12),
           Row(
             children: [
-              _pickerButton(Icons.remove, () => _adjust(-1)),
-              const SizedBox(width: 16),
-              Text(
-                '$_targetServings',
-                style: const TextStyle(
-                  fontSize: 26,
-                  fontWeight: FontWeight.w800,
-                  color: AppTheme.onSurface,
-                ),
-              ),
-              const SizedBox(width: 16),
-              _pickerButton(Icons.add, () => _adjust(1)),
-              const Spacer(),
-              if (isScaled)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primary,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    '× ${_scaleFactor.toStringAsFixed(2).replaceAll(RegExp(r'\.?0+$'), '')}',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                    ),
-                  ),
-                ),
+              for (int i = 0; i < _multipliers.length; i++) ...[
+                if (i > 0) const SizedBox(width: 8),
+                Expanded(child: _multiplierChip(i)),
+              ],
             ],
           ),
         ],
@@ -239,23 +205,36 @@ class _RecipeScaleScreenState extends State<RecipeScaleScreen> {
     );
   }
 
-  Widget _pickerButton(IconData icon, VoidCallback onTap) => Material(
-        color: Colors.white,
-        shape: const CircleBorder(),
-        child: InkWell(
-          onTap: onTap,
-          customBorder: const CircleBorder(),
-          child: Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3)),
-            ),
-            child: Icon(icon, size: 20, color: AppTheme.primary),
+  Widget _multiplierChip(int index) {
+    final selected = _multipliers[index] == _multiplier;
+    return GestureDetector(
+      onTap: () => setState(() => _multiplier = _multipliers[index]),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? AppTheme.primary : Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: selected
+                ? AppTheme.primary
+                : AppTheme.primary.withValues(alpha: 0.25),
           ),
         ),
-      );
+        alignment: Alignment.center,
+        child: Text(
+          _labels[index],
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            color: selected ? Colors.white : AppTheme.primary,
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Row helpers ──────────────────────────────────────────────────────────
 
   Widget _sectionTitle(BuildContext context, String title) => Padding(
         padding: const EdgeInsets.only(bottom: 12),
@@ -265,24 +244,6 @@ class _RecipeScaleScreenState extends State<RecipeScaleScreen> {
                 fontWeight: FontWeight.w800,
                 color: AppTheme.onSurface,
               ),
-        ),
-      );
-
-  Widget _ingredientRow(BuildContext context, String display) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 5),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Padding(
-              padding: EdgeInsets.only(top: 3),
-              child: Icon(Icons.circle, size: 6, color: AppTheme.primary),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(display,
-                  style: Theme.of(context).textTheme.bodyMedium),
-            ),
-          ],
         ),
       );
 
@@ -321,4 +282,54 @@ class _RecipeScaleScreenState extends State<RecipeScaleScreen> {
           ],
         ),
       );
+}
+
+// Separate StatelessWidget so the ValueKey on it causes full recreation
+class _IngredientsSection extends StatelessWidget {
+  final BuildContext context;
+  final List<String> ingredients;
+
+  const _IngredientsSection({
+    super.key,
+    required this.context,
+    required this.ingredients,
+  });
+
+  @override
+  Widget build(BuildContext _) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Text(
+            'Ingredientes',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.onSurface,
+                ),
+          ),
+        ),
+        for (final display in ingredients)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 5),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.only(top: 3),
+                  child: Icon(Icons.circle, size: 6, color: AppTheme.primary),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(display,
+                      style: Theme.of(context).textTheme.bodyMedium),
+                ),
+              ],
+            ),
+          ),
+        const SizedBox(height: 24),
+      ],
+    );
+  }
 }
