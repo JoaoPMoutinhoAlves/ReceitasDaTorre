@@ -31,7 +31,7 @@ Always respond with a valid JSON object matching this exact schema:
 Rules:
 - Extract as much information as possible from the raw text.
 - If the text is not a recipe, return {"name": "Unknown Recipe", "ingredients": [], "steps": [], ...} with all other fields null/empty.
-- For ingredients, always split amount, unit, and item (e.g. "2 cups flour" → amount:"2", unit:"cups", item:"flour").
+- For ingredients, ALWAYS split into amount, unit, and item. The amount field must contain ONLY the numeric value as a string (e.g. "2", "1/2", "2.5"). The unit field contains the unit of measurement. The item field contains only the ingredient name with no numbers. Example: "6 ovos" → amount:"6", unit:null, item:"ovos". "2 xícaras de farinha" → amount:"2", unit:"xícaras", item:"farinha". Never put a number inside the item field.
 - Steps should be in order, one per array element.
 - Do not invent information not present in the source.
 - Return ONLY the JSON object, no markdown, no explanation.

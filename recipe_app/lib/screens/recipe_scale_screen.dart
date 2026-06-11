@@ -33,15 +33,69 @@ class _RecipeScaleScreenState extends State<RecipeScaleScreen> {
 
   List<String> _buildIngredientLines(double multiplier) {
     return widget.recipe.ingredients.map((ing) {
-      final scaledAmount = _scaleAmount(ing.amount, multiplier);
+      String scaledAmount;
+      String displayItem;
+
+      final rawAmount = ing.amount?.trim();
+      final hasAmount = rawAmount != null && rawAmount.isNotEmpty;
+
+      if (hasAmount) {
+        // amount field is properly populated — scale it directly
+        scaledAmount = _scaleAmount(rawAmount, multiplier);
+        displayItem = ing.item;
+      } else {
+        // amount is null/empty — the LLM may have embedded the number
+        // inside item (e.g. item="6 ovos"). Try to extract and scale it.
+        final split = _extractLeadingNumber(ing.item);
+        if (split != null) {
+          scaledAmount = _format(split.$1 * multiplier);
+          displayItem = split.$2;
+        } else {
+          // Truly no quantity (e.g. "a gosto", "q.b.") — keep unchanged
+          scaledAmount = '';
+          displayItem = ing.item;
+        }
+      }
+
       final parts = <String>[
         if (scaledAmount.isNotEmpty) scaledAmount,
         if (ing.unit != null) ing.unit!,
-        ing.item,
+        displayItem,
         if (ing.note != null) '(${ing.note!})',
       ];
-      return parts.join(' ');
+      return parts.join(' ').trim();
     }).toList();
+  }
+
+  /// If [item] begins with a recognisable quantity, returns (value, remainder).
+  /// "6 ovos"       → (6.0,  "ovos")
+  /// "1/2 colher"   → (0.5,  "colher")
+  /// "2 1/2 chávenas" → (2.5, "chávenas")
+  /// "a gosto"      → null
+  (double, String)? _extractLeadingNumber(String item) {
+    final s = item.trim();
+    // Mixed number: "2 1/2 ..."
+    final mixed = RegExp(r'^(\d+)\s+(\d+)/(\d+)\s+(.+)$').firstMatch(s);
+    if (mixed != null) {
+      final w = double.parse(mixed.group(1)!);
+      final n = double.parse(mixed.group(2)!);
+      final d = double.parse(mixed.group(3)!);
+      if (d != 0) return (w + n / d, mixed.group(4)!.trim());
+    }
+    // Fraction: "1/2 ..."
+    final frac = RegExp(r'^(\d+)/(\d+)\s+(.+)$').firstMatch(s);
+    if (frac != null) {
+      final n = double.parse(frac.group(1)!);
+      final d = double.parse(frac.group(2)!);
+      if (d != 0) return (n / d, frac.group(3)!.trim());
+    }
+    // Integer or decimal: "6 ...", "2.5 ...", "2,5 ..."
+    final num = RegExp(r'^(\d+(?:[.,]\d+)?)\s+(.+)$').firstMatch(s);
+    if (num != null) {
+      final v = _parseNum(num.group(1)!);
+      if (v != null) return (v, num.group(2)!.trim());
+    }
+    return null;
   }
 
   String _scaleAmount(String? raw, double multiplier) {
@@ -163,7 +217,9 @@ class _RecipeScaleScreenState extends State<RecipeScaleScreen> {
 
                   // Multiplier picker
                   _buildMultiplierPicker(context),
-                  const SizedBox(height: 28),
+                  const SizedBox(height: 12),
+
+                  const SizedBox(height: 16),
 
                   // Ingredients — read straight from _ingredientLines (state)
                   if (_ingredientLines.isNotEmpty) ...[
