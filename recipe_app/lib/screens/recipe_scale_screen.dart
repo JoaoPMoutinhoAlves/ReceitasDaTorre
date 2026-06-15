@@ -1,7 +1,30 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../models/recipe.dart';
 import '../theme/app_theme.dart';
+
+/// Per-ingredient base data computed once from the recipe at 1×.
+/// [baseValue] is the numeric 1× amount (null when the ingredient has no
+/// scalable quantity, e.g. "a gosto"); [rawAmount] holds the original amount
+/// string for unscalable rows that still carry text.
+class _IngredientBase {
+  final double? baseValue;
+  final String? rawAmount;
+  final String? unit;
+  final String item;
+  final String? note;
+
+  const _IngredientBase({
+    this.baseValue,
+    this.rawAmount,
+    this.unit,
+    required this.item,
+    this.note,
+  });
+
+  bool get scalable => baseValue != null && baseValue! > 0;
+}
 
 class RecipeScaleScreen extends StatefulWidget {
   final Recipe recipe;
@@ -18,54 +41,114 @@ class _RecipeScaleScreenState extends State<RecipeScaleScreen> {
 
   double _multiplier = 1.0;
 
-  // Pre-computed ingredient display strings stored as STATE.
-  // Updated explicitly on every multiplier change so Flutter has no
-  // opportunity to skip re-rendering them.
-  late List<String> _ingredientLines;
+  late List<_IngredientBase> _bases;
+
+  // One controller per ingredient amount field (null for unscalable rows).
+  late List<TextEditingController?> _amountControllers;
+  // Controller for the custom "X" multiplier field.
+  final TextEditingController _customController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _ingredientLines = _buildIngredientLines(1.0);
+    _bases = _computeBases();
+    _amountControllers = _bases
+        .map((b) => b.scalable
+            ? TextEditingController(text: _format(b.baseValue!))
+            : null)
+        .toList();
+    _customController.text = _formatMultiplier(1.0);
   }
 
-  // ── Core computation ─────────────────────────────────────────────────────
+  @override
+  void dispose() {
+    for (final c in _amountControllers) {
+      c?.dispose();
+    }
+    _customController.dispose();
+    super.dispose();
+  }
 
-  List<String> _buildIngredientLines(double multiplier) {
+  // ── Base computation (once) ──────────────────────────────────────────────
+
+  List<_IngredientBase> _computeBases() {
     return widget.recipe.ingredients.map((ing) {
-      String scaledAmount;
-      String displayItem;
-
       final rawAmount = ing.amount?.trim();
       final hasAmount = rawAmount != null && rawAmount.isNotEmpty;
 
       if (hasAmount) {
-        // amount field is properly populated — scale it directly
-        scaledAmount = _scaleAmount(rawAmount, multiplier);
-        displayItem = ing.item;
-      } else {
-        // amount is null/empty — the LLM may have embedded the number
-        // inside item (e.g. item="6 ovos"). Try to extract and scale it.
-        final split = _extractLeadingNumber(ing.item);
-        if (split != null) {
-          scaledAmount = _format(split.$1 * multiplier);
-          displayItem = split.$2;
-        } else {
-          // Truly no quantity (e.g. "a gosto", "q.b.") — keep unchanged
-          scaledAmount = '';
-          displayItem = ing.item;
+        final v = _parse(rawAmount);
+        if (v != null) {
+          return _IngredientBase(
+            baseValue: v,
+            unit: ing.unit,
+            item: ing.item,
+            note: ing.note,
+          );
         }
+        // Amount present but unparseable (e.g. "a gosto") — keep as text.
+        return _IngredientBase(
+          rawAmount: rawAmount,
+          unit: ing.unit,
+          item: ing.item,
+          note: ing.note,
+        );
       }
 
-      final parts = <String>[
-        if (scaledAmount.isNotEmpty) scaledAmount,
-        if (ing.unit != null) ing.unit!,
-        displayItem,
-        if (ing.note != null) '(${ing.note!})',
-      ];
-      return parts.join(' ').trim();
+      // amount is null/empty — the number may be embedded in item ("6 ovos").
+      final split = _extractLeadingNumber(ing.item);
+      if (split != null) {
+        return _IngredientBase(
+          baseValue: split.$1,
+          unit: ing.unit,
+          item: split.$2,
+          note: ing.note,
+        );
+      }
+      return _IngredientBase(unit: ing.unit, item: ing.item, note: ing.note);
     }).toList();
   }
+
+  // ── Multiplier application ────────────────────────────────────────────────
+
+  /// Sets the multiplier from any source (chip, custom field, ingredient edit)
+  /// and re-syncs every amount field + the custom field to match.
+  void _applyMultiplier(double m) {
+    if (m <= 0) return;
+    setState(() => _multiplier = m);
+    for (int i = 0; i < _bases.length; i++) {
+      final b = _bases[i];
+      if (b.scalable) {
+        _amountControllers[i]!.text = _format(b.baseValue! * m);
+      }
+    }
+    _customController.text = _formatMultiplier(m);
+  }
+
+  /// User edited an ingredient amount by hand — derive the multiplier from
+  /// the ratio against its 1× base and rescale everything.
+  void _onAmountEdited(int index, String text) {
+    final base = _bases[index].baseValue;
+    if (base == null || base <= 0) return;
+    final v = _parse(text.trim());
+    if (v == null || v <= 0) {
+      // Invalid input — revert to the current scaled value.
+      _amountControllers[index]!.text = _format(base * _multiplier);
+      return;
+    }
+    _applyMultiplier(v / base);
+  }
+
+  void _onCustomEdited(String text) {
+    final v = _parse(text.trim());
+    if (v == null || v <= 0) {
+      _customController.text = _formatMultiplier(_multiplier);
+      return;
+    }
+    _applyMultiplier(v);
+  }
+
+  // ── Parsing & formatting ──────────────────────────────────────────────────
 
   /// If [item] begins with a recognisable quantity, returns (value, remainder).
   /// "6 ovos"       → (6.0,  "ovos")
@@ -96,13 +179,6 @@ class _RecipeScaleScreenState extends State<RecipeScaleScreen> {
       if (v != null) return (v, num.group(2)!.trim());
     }
     return null;
-  }
-
-  String _scaleAmount(String? raw, double multiplier) {
-    if (raw == null || raw.trim().isEmpty) return '';
-    final parsed = _parse(raw.trim());
-    if (parsed == null) return raw.trim();
-    return _format(parsed * multiplier);
   }
 
   double? _parse(String s) {
@@ -164,15 +240,13 @@ class _RecipeScaleScreenState extends State<RecipeScaleScreen> {
     return s;
   }
 
-  // ── Multiplier selection ─────────────────────────────────────────────────
-
-  void _selectMultiplier(double m) {
-    // Recompute ingredient lines and store them in state atomically.
-    final lines = _buildIngredientLines(m);
-    setState(() {
-      _multiplier = m;
-      _ingredientLines = lines;
-    });
+  // Plain decimal formatting for the multiplier value (no fractions).
+  String _formatMultiplier(double v) {
+    final s = v
+        .toStringAsFixed(2)
+        .replaceAll(RegExp(r'0+$'), '')
+        .replaceAll(RegExp(r'\.$'), '');
+    return s.isEmpty ? '0' : s;
   }
 
   // ── Build ────────────────────────────────────────────────────────────────
@@ -217,15 +291,13 @@ class _RecipeScaleScreenState extends State<RecipeScaleScreen> {
 
                   // Multiplier picker
                   _buildMultiplierPicker(context),
-                  const SizedBox(height: 12),
-
                   const SizedBox(height: 16),
 
-                  // Ingredients — read straight from _ingredientLines (state)
-                  if (_ingredientLines.isNotEmpty) ...[
+                  // Ingredients
+                  if (_bases.isNotEmpty) ...[
                     _sectionTitle(context, 'Ingredientes'),
-                    for (int i = 0; i < _ingredientLines.length; i++)
-                      _ingredientRow(context, i, _ingredientLines[i]),
+                    for (int i = 0; i < _bases.length; i++)
+                      _ingredientRow(context, i),
                     const SizedBox(height: 24),
                   ],
 
@@ -246,6 +318,8 @@ class _RecipeScaleScreenState extends State<RecipeScaleScreen> {
   }
 
   Widget _buildMultiplierPicker(BuildContext context) {
+    final isCustom = !_multiplierValues.contains(_multiplier);
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
@@ -290,6 +364,68 @@ class _RecipeScaleScreenState extends State<RecipeScaleScreen> {
               ],
             ],
           ),
+          const SizedBox(height: 10),
+          // Custom "X" multiplier card
+          _customMultiplierCard(context, isCustom),
+        ],
+      ),
+    );
+  }
+
+  Widget _customMultiplierCard(BuildContext context, bool selected) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: selected ? AppTheme.primary.withValues(alpha: 0.10) : Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: selected
+              ? AppTheme.primary
+              : AppTheme.primary.withValues(alpha: 0.25),
+        ),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.close, size: 14, color: AppTheme.primary),
+          const SizedBox(width: 4),
+          Text(
+            'Personalizado',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.primary,
+                ),
+          ),
+          const Spacer(),
+          SizedBox(
+            width: 72,
+            child: TextField(
+              controller: _customController,
+              textAlign: TextAlign.center,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+              ],
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.primary,
+              ),
+              decoration: const InputDecoration(
+                isDense: true,
+                contentPadding:
+                    EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                suffixText: '×',
+                border: OutlineInputBorder(),
+                focusedBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: AppTheme.primary),
+                ),
+              ),
+              onSubmitted: _onCustomEdited,
+              onEditingComplete: () =>
+                  _onCustomEdited(_customController.text),
+            ),
+          ),
         ],
       ),
     );
@@ -302,7 +438,7 @@ class _RecipeScaleScreenState extends State<RecipeScaleScreen> {
   }) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () => _selectMultiplier(value),
+      onTap: () => _applyMultiplier(value),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(vertical: 10),
@@ -341,28 +477,77 @@ class _RecipeScaleScreenState extends State<RecipeScaleScreen> {
         ),
       );
 
-  // Key on ingredient rows forces Flutter to treat each as a fresh widget
-  // when _ingredientLines changes.
-  Widget _ingredientRow(BuildContext context, int index, String display) => Padding(
-        key: ValueKey('ing_${_multiplier}_$index'),
-        padding: const EdgeInsets.symmetric(vertical: 5),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Padding(
-              padding: EdgeInsets.only(top: 3),
-              child: Icon(Icons.circle, size: 6, color: AppTheme.primary),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                display,
-                style: Theme.of(context).textTheme.bodyMedium,
+  Widget _ingredientRow(BuildContext context, int index) {
+    final base = _bases[index];
+
+    // Trailing text: unit + item + note.
+    final trailing = <String>[
+      if (base.unit != null) base.unit!,
+      base.item,
+      if (base.note != null) '(${base.note!})',
+    ].join(' ').trim();
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(top: 3),
+            child: Icon(Icons.circle, size: 6, color: AppTheme.primary),
+          ),
+          const SizedBox(width: 10),
+          if (base.scalable) ...[
+            // Editable amount — scales every other ingredient when changed.
+            SizedBox(
+              width: 56,
+              child: TextField(
+                controller: _amountControllers[index],
+                textAlign: TextAlign.center,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'[0-9.,/ ]')),
+                ],
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.onSurface,
+                ),
+                decoration: const InputDecoration(
+                  isDense: true,
+                  contentPadding:
+                      EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                  border: OutlineInputBorder(),
+                  focusedBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: AppTheme.primary),
+                  ),
+                ),
+                onSubmitted: (t) => _onAmountEdited(index, t),
+                onEditingComplete: () =>
+                    _onAmountEdited(index, _amountControllers[index]!.text),
               ),
             ),
+            const SizedBox(width: 8),
+          ] else if (base.rawAmount != null) ...[
+            Text(
+              base.rawAmount!,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+            const SizedBox(width: 6),
           ],
-        ),
-      );
+          Expanded(
+            child: Text(
+              trailing,
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _stepRow(BuildContext context, int number, String text) => Padding(
         padding: const EdgeInsets.only(bottom: 16),
