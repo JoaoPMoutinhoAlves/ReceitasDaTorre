@@ -110,6 +110,13 @@ class _InstallProgressDialogState extends State<_InstallProgressDialog> {
                 _status = 'Opening installer…';
               });
               break;
+            case OtaStatus.INSTALLATION_DONE:
+              setState(() {
+                _progress = null;
+                _done = true;
+                _status = 'Update installed.';
+              });
+              break;
             case OtaStatus.PERMISSION_NOT_GRANTED_ERROR:
               setState(() => _error =
                   'Permission denied. Allow "Install unknown apps" for Receitas, then try again.');
@@ -121,6 +128,7 @@ class _InstallProgressDialogState extends State<_InstallProgressDialog> {
               setState(() => _error = 'Update canceled.');
               break;
             case OtaStatus.DOWNLOAD_ERROR:
+            case OtaStatus.INSTALLATION_ERROR:
             case OtaStatus.INTERNAL_ERROR:
             case OtaStatus.CHECKSUM_ERROR:
               setState(() => _error = 'Update failed: ${event.value ?? event.status}');

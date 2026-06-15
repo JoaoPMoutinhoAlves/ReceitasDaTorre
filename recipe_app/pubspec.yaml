@@ -27,7 +27,7 @@ dependencies:
   # Read the running app's version at runtime (for update checks)
   package_info_plus: ^8.0.0
   # Download + install an APK update (sideloaded app, no Play Store)
-  ota_update: ^6.0.0
+  ota_update: ^7.1.0
 
 dev_dependencies:
   flutter_test:
