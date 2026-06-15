@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../models/recipe.dart';
+import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 
 class RecipeCard extends StatelessWidget {
@@ -64,7 +65,7 @@ class RecipeCard extends StatelessWidget {
       return AspectRatio(
         aspectRatio: 4 / 3,
         child: CachedNetworkImage(
-          imageUrl: recipe.imageUrl!,
+          imageUrl: ApiService.displayImageUrl(recipe.imageUrl!),
           fit: BoxFit.cover,
           errorWidget: (_, __, ___) => _imagePlaceholder(),
           placeholder: (_, __) => _imagePlaceholder(),

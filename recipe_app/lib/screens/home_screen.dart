@@ -257,7 +257,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         borderRadius: BorderRadius.circular(6),
                         child: r.imageUrl != null
                             ? CachedNetworkImage(
-                                imageUrl: r.imageUrl!,
+                                imageUrl: ApiService.displayImageUrl(r.imageUrl!),
                                 width: 48,
                                 height: 48,
                                 fit: BoxFit.cover,

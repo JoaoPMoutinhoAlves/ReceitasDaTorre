@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../models/recipe.dart';
+import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 
 /// Per-ingredient base data computed once from the recipe at 1×.
@@ -265,7 +266,7 @@ class _RecipeScaleScreenState extends State<RecipeScaleScreen> {
             flexibleSpace: recipe.imageUrl != null
                 ? FlexibleSpaceBar(
                     background: CachedNetworkImage(
-                      imageUrl: recipe.imageUrl!,
+                      imageUrl: ApiService.displayImageUrl(recipe.imageUrl!),
                       fit: BoxFit.cover,
                       errorWidget: (_, __, ___) =>
                           Container(color: const Color(0xFFFCEEE4)),

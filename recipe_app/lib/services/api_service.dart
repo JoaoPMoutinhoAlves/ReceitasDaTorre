@@ -13,14 +13,33 @@ class ApiService {
   static String get _defaultBaseUrl =>
       kIsWeb ? Uri.base.origin : 'http://192.168.1.134:8000';
 
+  // Synchronously-readable copy of the base URL, kept in sync by [baseUrl] and
+  // [setBaseUrl]. Used by widgets (e.g. image loading) that can't await.
+  static String _cachedBaseUrl = '';
+  static String get cachedBaseUrl =>
+      _cachedBaseUrl.isNotEmpty ? _cachedBaseUrl : _defaultBaseUrl;
+
   static Future<String> get baseUrl async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_baseUrlKey) ?? _defaultBaseUrl;
+    final url = prefs.getString(_baseUrlKey) ?? _defaultBaseUrl;
+    _cachedBaseUrl = url;
+    return url;
   }
 
   static Future<void> setBaseUrl(String url) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_baseUrlKey, url.trimRight().replaceAll(RegExp(r'/$'), ''));
+    final clean = url.trimRight().replaceAll(RegExp(r'/$'), '');
+    await prefs.setString(_baseUrlKey, clean);
+    _cachedBaseUrl = clean;
+  }
+
+  /// URL safe to render in an `<img>` on web: routed through the backend's
+  /// `/api/proxy-image` so the browser doesn't hit cross-origin (CORS) blocks
+  /// on Instagram/TikTok CDN images. On native platforms there is no CORS, so
+  /// the original URL is returned unchanged.
+  static String displayImageUrl(String url) {
+    if (!kIsWeb || url.isEmpty) return url;
+    return '$cachedBaseUrl/api/proxy-image?url=${Uri.encodeComponent(url)}';
   }
 
   static Map<String, String> get _headers => {

@@ -87,7 +87,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
             flexibleSpace: _recipe.imageUrl != null
                 ? FlexibleSpaceBar(
                     background: CachedNetworkImage(
-                      imageUrl: _recipe.imageUrl!,
+                      imageUrl: ApiService.displayImageUrl(_recipe.imageUrl!),
                       fit: BoxFit.cover,
                       errorWidget: (_, __, ___) => Container(color: const Color(0xFFFCEEE4)),
                     ),
