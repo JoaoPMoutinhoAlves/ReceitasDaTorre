@@ -1,7 +1,7 @@
 name: recipe_app
 description: Recipe Manager — import, search and browse your recipes.
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.1+2
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -24,6 +24,10 @@ dependencies:
   # PDF generation and printing
   pdf: ^3.11.0
   printing: ^5.13.0
+  # Read the running app's version at runtime (for update checks)
+  package_info_plus: ^8.0.0
+  # Download + install an APK update (sideloaded app, no Play Store)
+  ota_update: ^6.0.0
 
 dev_dependencies:
   flutter_test:

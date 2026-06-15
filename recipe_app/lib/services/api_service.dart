@@ -1,11 +1,17 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/recipe.dart';
 
 class ApiService {
   static const String _baseUrlKey = 'api_base_url';
-  static const String _defaultBaseUrl = 'http://192.168.1.134:8000';
+
+  // When running as a web app (e.g. served by the Home Assistant add-on via the
+  // "Open Web UI" button), default to the same origin that served the page so the
+  // bundled backend is reached automatically. Native builds fall back to the LAN IP.
+  static String get _defaultBaseUrl =>
+      kIsWeb ? Uri.base.origin : 'http://192.168.1.134:8000';
 
   static Future<String> get baseUrl async {
     final prefs = await SharedPreferences.getInstance();

@@ -1,8 +1,11 @@
 name: "Recipe Manager"
 description: "AI-powered recipe manager backend. Parses Instagram/TikTok captions into structured recipes using Claude API."
-version: "1.0.7"
+version: "1.0.8"
 slug: "recipe_manager"
 init: false
+
+# Show the "Open Web UI" button, opening the bundled Flutter web app served on port 8000.
+webui: "http://[HOST]:[PORT:8000]/"
 
 arch:
   - aarch64

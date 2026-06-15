@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import '../models/recipe.dart';
 import '../services/api_service.dart';
 import '../services/pdf_export_service.dart';
+import '../services/update_service.dart';
 import '../widgets/recipe_card.dart';
+import '../widgets/update_dialog.dart';
 import '../theme/app_theme.dart';
 import 'recipe_detail_screen.dart';
 import 'import_screen.dart';
@@ -34,6 +36,17 @@ class _HomeScreenState extends State<HomeScreen> {
     _reloadTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (mounted && !_loading) _load();
     });
+    _checkForUpdate();
+  }
+
+  /// Non-mandatory update check on launch. If the user already tapped "Later"
+  /// for this version, the popup is suppressed — it stays available in Settings.
+  Future<void> _checkForUpdate() async {
+    final info = await UpdateService.checkForUpdate();
+    if (info == null || !info.canInstall || !mounted) return;
+    if (await UpdateService.isDismissed(info.latestVersion)) return;
+    if (!mounted) return;
+    await showUpdateDialog(context, info);
   }
 
   @override

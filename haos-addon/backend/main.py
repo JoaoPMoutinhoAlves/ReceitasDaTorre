@@ -1,9 +1,11 @@
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import Optional
+import os
 import httpx
 
 from .database import engine, get_db
@@ -148,3 +150,13 @@ def delete_recipe(recipe_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Recipe not found")
     db.delete(recipe)
     db.commit()
+
+
+# ─── Web UI ──────────────────────────────────────────────────────────────────
+# Serve the bundled Flutter web app so it can be opened from the Home Assistant
+# add-on "Open Web UI" button. Mounted last so it never shadows the API routes
+# above. Skipped when the build is absent (e.g. the dev/docker-compose backend).
+
+WEBAPP_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "webapp")
+if os.path.isdir(WEBAPP_DIR):
+    app.mount("/", StaticFiles(directory=WEBAPP_DIR, html=True), name="webapp")
